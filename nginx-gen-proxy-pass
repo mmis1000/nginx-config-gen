@@ -1,0 +1,105 @@
+#!/bin/bash
+
+read -r -d '' templete <<'EOF'
+server {
+        listen 80;
+
+        root /var/www;
+        index index.html index.htm;
+
+        # Make site accessible from http://localhost/
+        server_name SERVER_NAME;
+
+        location / {
+                proxy_pass PROXY_PASS;
+                proxy_http_version     1.1;
+                proxy_set_header       Upgrade $http_upgrade;
+                proxy_set_header       Connection "upgrade";
+                proxy_set_header       Host $host;
+                # proxy_buffering        off;
+        }
+}
+EOF
+
+current_uid=$(id -u)
+file_name=
+proxy_to=
+site_domain=
+no_buffer=
+
+if [ $current_uid -ne 0 ];then 
+    echo 'this script require root for run!';
+    exit;
+fi
+
+
+for (( ; ; ))
+do
+    read -p "What is your config file name? : " -i "proxy_config_$(date +%Y%m%d%H%M%S)" -e file_name
+    for (( ; ; ))
+    do
+        read -p "Where do you proxy to?         : " -i "http://127.0.0.1:8080/" -e proxy_to
+        [[ "$proxy_to" =~ ^https?://[0-9A-Za-z\\-\\.]+(:[1-9][0-9]*)?/?$ ]] && break
+    done
+
+    for (( ; ; ))
+    do
+        read -p "what is your domain name?      : " -i "$file_name.$(hostname)" -e site_domain
+        [[ "$site_domain" =~ ^[0-9A-Za-z\\-\\.]+$ ]] && break
+    done
+    
+    
+    for (( ; ; ))
+    do
+        read -p "Disable buffering? [Y/n]       : " -i n -e no_buffer
+        [[ "$no_buffer" =~ ^[yYnN]$ ]] && break
+    done
+    
+    echo 'Do you wish to use following config?'
+    echo "  config file name: $file_name"
+    echo "  proxy to:         $proxy_to"
+    echo "  site domain:      $site_domain"
+    
+    for (( ; ; ))
+    do
+        read -p "Confirm to continue [(Y)es/(n)o/(c)ancel] " -n 6 -r
+        echo
+        if [[ $REPLY =~ ^([YyNnCc]|[Yy]es|[N]o|[Cc]ancel)$ ]];then
+            break
+        fi
+    done
+    
+    if [[ $REPLY =~ ^[Nn]o?$ ]];then
+        continue
+    elif [[ $REPLY =~ ^([Cc]|[Cc]ancel)$ ]];then
+        echo 'Generation caceled'
+        break
+    elif [[ $REPLY =~ ^([Yy]|[Yy]es)$ ]];then
+        if [ -f "/etc/nginx/sites-available/$file_name" ] || [ -f "/etc/nginx/sites-enabled/$file_name" ];
+        then
+            read -p "File  existed. confirm to override [y/n] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]?$ ]];then
+                rm "/etc/nginx/sites-available/$file_name" 2> /dev/null
+                rm "/etc/nginx/sites-enabled/$file_name" 2> /dev/null
+            else
+                echo aborted
+                break
+            fi
+        fi
+        echo "$templete" > "/etc/nginx/sites-available/$file_name"
+        sed -i "s#PROXY_PASS#${proxy_to}#g"                        "/etc/nginx/sites-available/$file_name"
+        sed -i "s#SERVER_NAME#${site_domain}#g"                    "/etc/nginx/sites-available/$file_name"
+        
+        if [[ $no_buffer =~ ^([Yy])$ ]];then
+            sed -i "s/# proxy/proxy/g"                             "/etc/nginx/sites-available/$file_name"
+        fi
+        
+        sed -i "s/\\s\\+#.\\+\\r\\?\\n\\?//g"                               "/etc/nginx/sites-available/$file_name"
+        
+        ln -s "/etc/nginx/sites-available/$file_name" "/etc/nginx/sites-enabled/$file_name"
+        echo 'Generated finished, reloading nginx...'
+        nginx -s reload
+        break
+    fi
+done

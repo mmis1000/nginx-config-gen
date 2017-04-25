@@ -59,6 +59,7 @@ do
     echo "  config file name: $file_name"
     echo "  proxy to:         $proxy_to"
     echo "  site domain:      $site_domain"
+    echo "  disable buffer:   $no_buffer"
     
     for (( ; ; ))
     do
